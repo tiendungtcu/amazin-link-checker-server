@@ -1,5 +1,6 @@
 const rp = require('request-promise');
-const $ = require('cheerio');
+// const $ = require('cheerio');
+const cheerio = require('cheerio');
 
 var fs = require('fs');
 const { text } = require('express');
@@ -13,7 +14,7 @@ const recursiveChildrenText = function(linkObject, text) {
 
     if (linkObject.children && linkObject.children.length > 0) {
         for (let i = 0; i < linkObject.children.length; i++) {
-            console.log(linkObject.children[i]);
+            // console.log(linkObject.children[i]);
             const accumulator = linkObject.children[i].data || text;
             const newText = recursiveChildrenText(linkObject.children[i], accumulator);
             if (newText !== text) {
@@ -85,19 +86,20 @@ const extractAhrefAndText = function(linkObject) {     //linkObject is: $('a', h
 async function articleScraper(url) {
     try {
         let html = await rp(url);
-
+        let $ = cheerio.load(html, null, false);
         const urls = [];
 
         var shortenedExp = /(https?:\/\/(.+?\.)?(amzn.to)(\/[A-Za-z0-9\-\._~:\/\?#\[\]@!$&'\(\)\*\+,;\=]*)?)/;
-    
-        var urlsCount = $(html).find('a').length;
+        var coakedExp = /(https?:\/\/(.+?\.)?(streammentor.com\/recommends)(\/[A-Za-z0-9\-\._~:\/\?#\[\]@!$&'\(\)\*\+,;\=]*)?)/;
+        var urlsCount = $('a').length;
+        console.log("so luong url la", urlsCount)
         //console.log('Found ' + urlsCount + ' URLs');
         // we now have ALL the urls, whether they're affiliate links or not 
         // now check each one to see if it's an affiliate link, and if it is, push it to urls 
 
         for (let i = 0; i < urlsCount; i++) {
             //console.log("\nEVALUATING URL #", i);
-            let extracted = extractAhrefAndText($('a', html)[i]); // object with url and user-readable link text 
+            let extracted = extractAhrefAndText($('a')[i]); // object with url and user-readable link text 
     
     
             // if we have an href, look for the tag or the amzn.to/ASIN format
@@ -108,6 +110,8 @@ async function articleScraper(url) {
     
                 // if it does not have 'tag=', see if it is a shortened URL 
                 let shortened = shortenedExp.test(extracted.ahref);
+
+                let coaked = coakedExp.test(extracted.ahref);
     
                 /* 
                 console.log(
@@ -118,7 +122,7 @@ async function articleScraper(url) {
                     );
                 */
                 // a url gets to go into the array if it either has a tag or matches the expression 
-                if (containsTag || shortened) {
+                if (containsTag || shortened || coaked) {
                     let articleURLData = {
                         url: extracted.ahref,
                         urlText: extracted.urlText

@@ -1,6 +1,4 @@
 const express = require('express');
-const rp = require('request-promise');
-const cheerio = require('cheerio');
 const app = express();
 const server = require('http').Server(app);
 const port = process.env.PORT || 3000;
@@ -9,8 +7,7 @@ var fs = require('fs');
 const io = require('socket.io')(server);
 const path = require('path');
 const amazonPaapi = require('amazon-paapi');
-const uu = require('url-unshort')();
-uu.add('streammentor.com');
+let uu = require('url-unshort')();
 let linksProcessed = 0;
 let scrapedUrlsObj = {};
 let urlCache = {};
@@ -51,7 +48,7 @@ async function *getBatch(commonParameters, requestParameters) {
       const endIndex = index + 10 < asins.length ? index + 10 : asins.length;
       const chunk = asins.slice(index, endIndex);
       const newRequestParameters = { ...requestParameters, ...{ ItemIds: chunk }};
-      // console.log(newRequestParameters)
+      console.log(newRequestParameters)
       try {
         let result = await amazonPaapi.GetItems(commonParameters, newRequestParameters);
         await sleep(5000);
@@ -60,45 +57,6 @@ async function *getBatch(commonParameters, requestParameters) {
       } catch(err) {
           console.log(err);
       }
-    }
-}
-
-async function *getBatch1(ItemIds) {
-    let index = 0;
-    let asins = ItemIds;
-
-    while (index < asins.length) {
-      if(stopSignalSent) break;
-      const endIndex = index + 1 < asins.length ? index + 1 : asins.length;
-      const chunk = asins.slice(index, endIndex);
-      console.log("day la chunk ",chunk)
-      // console.log(newRequestParameters)
-      const error = {ItemsResult: {Items: []}, Errors: [{Code: "ItemNotAccessible", Message: `The ItemId ${chunk[0]} is not accessible`}]}
-      try {
-        const options = {
-            method: 'GET',
-            uri: `https://www.amazon.com/dp/${chunk[0]}`
-        };
-        let html = await rp(options);
-        let $ = cheerio.load(html, null, false);
-        const title = $('#productTitle').html();
-        const price = $('.a-offscreen','#corePrice_feature_div').html()
-        // let result = await amazonPaapi.GetItems(commonParameters, newRequestParameters);
-        await sleep(5000);
-        // data.ItemsResult.Items
-        if(title){
-            const result = {ItemsResult: {Items: [{ASIN: chunk[0], title, price}]}}
-            console.log("contact amazon result", JSON.stringify(result))
-            yield result;
-        } else {
-            yield error;
-        }
-        
-      } catch(err) {
-        yield error;
-        console.log(err);
-      }
-      index += chunk.length;
     }
 }
 
@@ -129,28 +87,28 @@ async function getUniqueASINs(urls) {
 function updateFromEndWithProgress(urls, socketID) {
     // now the asin cache is filled in, so update the urls in the scrapedUrls object
     linksProcessed = 0;
-    urls.forEach((urlData) => {       
-        if (urlCache[urlData.url] && !asinCache[urlCache[urlData.url].asin]) {
+    urls.forEach((urlData) => {
+        linksProcessed+=1;
+        if (!asinCache[urlCache[urlData.url].asin]) {
             console.log("*** THIS URL / ASIN NOT IN ASINCACHE OBJECT ***");
-            // console.log(urlData);
-            // console.log(asinCache);
+            console.log(urlData);
+            console.log(asinCache);
 
             scrapedUrlsObj[urlData.url].urlText = urlData.urlText;
-            scrapedUrlsObj[urlData.url].itemName = 'Processing...', // product title from amazon
+            scrapedUrlsObj[urlData.url].itemName = 'No item name found', // product title from amazon
             scrapedUrlsObj[urlData.url].tag = urlCache[urlData.url].tag, // myassociateid-20
             scrapedUrlsObj[urlData.url].url = urlData.url, // http://amzn.to/1234XYZ or similar 
-            scrapedUrlsObj[urlData.url].validOnAmazon = 'Processing...' // asinCache[ASIN]: true/false 
+            scrapedUrlsObj[urlData.url].validOnAmazon = false // asinCache[ASIN]: true/false 
 
         } else {
             console.log("This URL is in the asin cache");
-            // console.log(urlData);
+            console.log(urlData);
 
             scrapedUrlsObj[urlData.url].urlText = urlData.urlText;
-            scrapedUrlsObj[urlData.url].itemName = urlCache[urlData.url] && asinCache[urlCache[urlData.url].asin] ? asinCache[urlCache[urlData.url].asin].itemName : 'no name found', // product title from amazon
-            scrapedUrlsObj[urlData.url].tag = urlCache[urlData.url]? urlCache[urlData.url].tag: "notag", // myassociateid-20
+            scrapedUrlsObj[urlData.url].itemName = asinCache[urlCache[urlData.url].asin] ? asinCache[urlCache[urlData.url].asin].itemName : 'no name found', // product title from amazon
+            scrapedUrlsObj[urlData.url].tag = urlCache[urlData.url].tag, // myassociateid-20
             scrapedUrlsObj[urlData.url].url = urlData.url, // http://amzn.to/1234XYZ or similar 
-            scrapedUrlsObj[urlData.url].validOnAmazon = urlCache[urlData.url] ? asinCache[urlCache[urlData.url].asin].valid : false// asinCache[ASIN]: true/false 
-            linksProcessed++;
+            scrapedUrlsObj[urlData.url].validOnAmazon = asinCache[urlCache[urlData.url].asin].valid // asinCache[ASIN]: true/false 
         }
     });
 
@@ -171,7 +129,7 @@ async function contactAmazon(commonParameters, uniqueAsins, urls, socketID) {
         ]
     };
 
-    for await (const res of getBatch1(uniqueAsins)) {
+    for await (const res of getBatch(commonParameters, requestParameters)) {
         console.log(new Date());
         let data = res;
 
@@ -179,7 +137,7 @@ async function contactAmazon(commonParameters, uniqueAsins, urls, socketID) {
             let item = data.ItemsResult.Items[i];
             asinCache[item.ASIN] = {
                 valid: true,
-                itemName: item.title
+                itemName: item.ItemInfo.Title.DisplayValue
             }
         }
 
@@ -207,7 +165,7 @@ async function contactAmazon(commonParameters, uniqueAsins, urls, socketID) {
             });
         }
 
-        // when this batch of 1 is ready, send it to the front-end 
+        // when this batch of 10 is ready, send it to the front-end 
         updateFromEndWithProgress(urls, socketID);
     }
 }
@@ -225,7 +183,7 @@ io.on('connection', function(socket) {
         stopSignalSent = true;
     })
 
-    socket.on('beginProcessing', async (url, socketID,marketplace, awsID, awsSecret, awsTag ) => {
+    socket.on('beginProcessing', async (url, socketID, awsID, awsSecret, awsTag, marketplace) => {
 
         const commonParameters = {
             'AccessKey': awsID,
@@ -260,7 +218,7 @@ io.on('connection', function(socket) {
 
         // now extract the unique asins for sending to amazon 
         let uniqueAsins = await getUniqueASINs(urls);
-        console.log("day la asins urls nhe", uniqueAsins);
+
         // now it is ready to interact with amazon server 
         await contactAmazon(commonParameters, uniqueAsins, urls, socketID);
     });
@@ -284,8 +242,9 @@ app.get('/fetch-static-data', (req, res) => {
 
 async function getAsins(urls) {
     let asins = [];
+
     for await (let urlData of urls) {
-        if(stopSignalSent) break;
+
         let data = await extractASINAndTagFromURL(urlData.url);
 
         // make an entry for it in the cache 
@@ -314,18 +273,18 @@ async function extractASINAndTagFromURL(url) {
     let tag = 'no tag found';
 
     //console.log("extracting ASIN and Tag from this url: ", url);
-    
     const shortenedMatch = url.match(/http(s?):\/\/amzn.to\/([a-zA-Z0-9]+)/);
-    const cloaked = url.match(/http(s?):\/\/streammentor.com\/recommends\/([a-zA-Z0-9]+)/);
-    if (shortenedMatch || cloaked) {
+    const shortened = shortenedMatch ? shortenedMatch[0] : '';
+
+    if (shortenedMatch) {
         // if this is a shortened URL, we have to figure out where it goes 
-        const longURL = await uu.expand(url);
+        const longURL = await uu.expand(shortened);
             if (longURL) {
                 const tagRaw = longURL.match(/(tag=([A-Za-z0-9-]{3,}))/);
                 tag = tagRaw[0].replace('tag=','');
-                const regex = RegExp("/([a-zA-Z0-9]{10})(?:[/?]|$)");
-                const asinMatch = longURL.match(regex);
-                asin = asinMatch ? asinMatch[0].replace(/\//g, '').replace(/\?/g, '') : '';
+
+                const asinMatch = longURL.match(/\/[A-Z0-9]{4,}\//);
+                asin = asinMatch ? asinMatch[0].replace(/\//g, '') : '';
             } else {
                 console.log('This url can\'t be expanded');
             }
