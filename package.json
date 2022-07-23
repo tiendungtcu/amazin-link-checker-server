@@ -30,6 +30,6 @@
     "request": "^2.88.2",
     "request-promise": "^4.2.6",
     "socket.io": "^2.3.0",
-    "url-unshort": "^5.0.0"
+    "url-unshort": "^6.0.0"
   }
 }
